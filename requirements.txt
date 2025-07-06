@@ -1,0 +1,6 @@
+google-generativeai
+firebase-admin
+pillow
+python-dotenv
+urllib3
+typer
