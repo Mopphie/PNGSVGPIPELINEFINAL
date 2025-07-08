@@ -458,11 +458,9 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
     main_cat_id = re.sub(r"[^a-z0-9]+", "-", main_cat.lower())
     main_cat_doc = {
         "id": main_cat_id,
-        "name": main_cat,
-        "isMainCategory": True,
-        "parentCategoryId": None,
-        "order": 0,
-        "createdAt": firestore.SERVER_TIMESTAMP
+        "nameKey": f"category{main_cat.replace(' ', '').replace('-', '')}",  # KORRIGIERT: nameKey hinzugefügt
+        "parentCategoryId": "",  # KORRIGIERT: leerer String statt None
+        "order": 0
     }
     
     # Nur setzen wenn noch nicht existiert
@@ -475,11 +473,9 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
     sub_cat_id = f"{main_cat_id}_{re.sub(r'[^a-z0-9]+', '-', sub_cat.lower())}"
     sub_cat_doc = {
         "id": sub_cat_id,
-        "name": sub_cat,
-        "isMainCategory": False,
-        "parentCategoryId": main_cat_id,
-        "order": 0,
-        "createdAt": firestore.SERVER_TIMESTAMP
+        "nameKey": f"category{main_cat.replace(' ', '').replace('-', '')}{sub_cat.replace(' ', '').replace('-', '')}",  # KORRIGIERT: nameKey hinzugefügt
+        "parentCategoryId": main_cat_id,  # KORRIGIERT: String statt None
+        "order": 0
     }
     
     # Nur setzen wenn noch nicht existiert
@@ -550,23 +546,31 @@ def process_png(png_path: Path, main_cat: str, sub_cat: str):
         
         log.info("Schritt 6: Speichere Metadaten in Firestore...")
         
+        # Altersgruppe basierend auf Kategorie bestimmen
+        if "kleinkinder" in main_cat.lower() or "0-5" in main_cat:
+            age_group = "0-5"
+        elif "schulkinder" in main_cat.lower() or "6-13" in main_cat:
+            age_group = "6-13"
+        elif "jugendliche" in main_cat.lower() or "14-99" in main_cat:
+            age_group = "14-99"
+        else:
+            age_group = "6-13"  # Standard-Altersgruppe
+        
+        # Tags zu einfacher Liste zusammenfassen (Deutsch und Englisch)
+        combined_tags = list(set(translations["de"]["tags"] + translations["en"]["tags"]))
+        
         # KORRIGIERT: Bild-Metadaten für Flutter-App kompatible Struktur
         image_doc = {
             "id": slug,
-            "title": {lc: d["title"] for lc, d in translations.items()},
-            "tags": {lc: d["tags"] for lc, d in translations.items()},
+            "titles": {lc: d["title"] for lc, d in translations.items()},  # KORRIGIERT: title → titles
+            "ageGroup": age_group,  # KORRIGIERT: ageGroup hinzugefügt
+            "tags": combined_tags,  # KORRIGIERT: tags als Liste statt Dictionary
             "thumbnailPath": png_blob_name,  # Pfad für Flutter-App
             "svgPath": svg_blob_name,        # Pfad für Flutter-App
-            "thumbUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/{png_blob_name}",  # URL als Fallback
-            "svgUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/{svg_blob_name}",    # URL als Fallback
             "categoryId": category_id,       # Direkte Referenz zur Kategorie
-            "mainCategoryId": main_cat,      # Referenz zur Hauptkategorie
-            "isPremium": False,
             "isNew": True,
             "popularity": 0,
-            "timestamp": firestore.SERVER_TIMESTAMP,
-            "createdAt": firestore.SERVER_TIMESTAMP,
-            "hash": file_hash,
+            "timestamp": firestore.SERVER_TIMESTAMP,  # KORRIGIERT: korrekte Timestamp-Verwendung
         }
         
         # KORRIGIERT: Bild in flacher collection speichern
