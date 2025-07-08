@@ -39,24 +39,23 @@ Die Inkompatibilität zwischen Ihrem Python-Skript und der Flutter-App wurde beh
     "tr": "Küçük çocuklar"
   },
   "iconUrl": "https://storage.googleapis.com/your-bucket/icons/kleinkinder-0-5.png",
-  "subcategoryIds": ["haustiere", "wildtiere", "meerestiere", "voegel"],
+  "subcategoryIds": ["hunde", "katzen", "voegel"],
   "ageGroup": "0-5",
   "parentCategoryId": "",
   "order": 1
 }
 ```
 
-### **2. Neue KI-Funktionen hinzugefügt**
+### **2. Ordnerstruktur-basierte Kategorien**
 
-#### **`generate_subcategories_with_gemini()`**
-- 🤖 Generiert automatisch 3-5 sinnvolle Subkategorien für jede Hauptkategorie
-- 🎯 Nutzt Gemini API für intelligente Kategorie-Vorschläge
-- 📝 Beispiel: "Tiere" → ["Haustiere", "Wildtiere", "Meerestiere", "Vögel", "Insekten"]
-
-#### **`translate_subcategories_to_all_languages()`**
-- 🌍 Übersetzt alle Subkategorien automatisch in alle 100 Sprachen
-- 💾 Nutzt Cache für Performance
-- 🔄 Fallback zu Originalsprache bei Fehlern
+#### **Funktionsweise:**
+```
+📁 images/
+├── Tiere_Hunde/        → Hauptkategorie: "Tiere", Subkategorie: "Hunde"
+├── Tiere_Katzen/       → Hauptkategorie: "Tiere", Subkategorie: "Katzen"
+├── Fahrzeuge_Autos/    → Hauptkategorie: "Fahrzeuge", Subkategorie: "Autos"
+└── Märchen_Prinzessin/ → Hauptkategorie: "Märchen", Subkategorie: "Prinzessin"
+```
 
 #### **`translate_category_name()`**
 - 🌐 Übersetzt Kategorienamen automatisch in 14 wichtige Sprachen
@@ -66,10 +65,10 @@ Die Inkompatibilität zwischen Ihrem Python-Skript und der Flutter-App wurde beh
 #### **Komplett überarbeitete `create_categories()`**
 - ✅ `names` statt `nameKey` (Map<String, String>)
 - ✅ `iconUrl` automatisch generiert
-- ✅ `subcategoryIds` mit **reinen IDs** (z.B. "malen", "tiere")
+- ✅ `subcategoryIds` mit **reinen IDs** (z.B. "hunde", "katzen")
 - ✅ `ageGroup` automatisch erkannt
-- ✅ **Gemini-generierte Subkategorien** in allen 100 Sprachen
-- ✅ Intelligente Matching-Logik für bestehende Bilder
+- ✅ **Subkategorien aus Ordnernamen** in allen 100 Sprachen übersetzt
+- ✅ Direkte Zuordnung: Ein Ordner = Eine Subkategorie
 
 ### **3. Automatische Altersgruppen-Erkennung**
 
@@ -90,25 +89,29 @@ else:
 "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{category_id}.png"
 ```
 
-### **5. Automatische Gemini-Subkategorie-Generierung**
+### **5. Ordnerstruktur-basierte Subkategorien**
 
 ```python
-# Beispiel: Für "Tiere" wird automatisch generiert:
-subcategories = generate_subcategories_with_gemini("Tiere")
-# → ["Haustiere", "Wildtiere", "Meerestiere", "Vögel", "Insekten"]
+# Ordner: "Tiere_Hunde" → Subkategorie: "Hunde"
+# Ordner: "Tiere_Katzen" → Subkategorie: "Katzen"
+# Ordner: "Fahrzeuge_Autos" → Subkategorie: "Autos"
 
 # Jede Subkategorie wird in alle 100 Sprachen übersetzt:
-translations = translate_subcategories_to_all_languages(subcategories)
-# → {"haustiere": {"de": "Haustiere", "en": "Pets", "es": "Mascotas", ...}}
+sub_cat_translations = {}
+for lang_name, lang_code in LANG_MAP.items():
+    translated_name, _ = translate_batch("Hunde", [], lang_name, lang_code)
+    sub_cat_translations[lang_code] = translated_name
+# → {"de": "Hunde", "en": "Dogs", "es": "Perros", "fr": "Chiens", ...}
 ```
 
 ### **6. Reine Subkategorie-IDs**
 
 ```python
-# Vorher: "kleinkinder-0-5_haustiere"
-# Nachher: "haustiere"
+# Vorher: "kleinkinder-0-5_hunde"
+# Nachher: "hunde"
 
-subcategoryIds = ["haustiere", "wildtiere", "meerestiere", "voegel"]
+# Basierend auf Ihren Ordnern:
+subcategoryIds = ["hunde", "katzen", "voegel"]  # Aus Tiere_Hunde/, Tiere_Katzen/, Tiere_Vögel/
 ```
 
 ## 📋 **NÄCHSTE SCHRITTE**
@@ -144,11 +147,11 @@ Ihre Firebase-Daten sind jetzt **100% kompatibel** mit der Flutter-App Struktur 
 - ✅ Altersgruppen filtern
 
 ### **🤖 KI-Funktionen**
-- ✅ **Automatische Subkategorie-Generierung** mit Gemini
-- ✅ **Intelligente Kategorie-Vorschläge** basierend auf Kontext
-- ✅ **100-Sprachen-Übersetzung** für alle Kategorien
-- ✅ **Reine Subkategorie-IDs** (z.B. "malen", "tiere")
-- ✅ **Smart Matching** zwischen Bildern und Kategorien
+- ✅ **Automatische Übersetzung** aller Kategorien in 100 Sprachen
+- ✅ **Ordnerstruktur-basierte Kategorisierung** (maincat_subcat)
+- ✅ **Reine Subkategorie-IDs** (z.B. "hunde", "katzen")
+- ✅ **Intelligente Namens-Übersetzung** mit Gemini
+- ✅ **Cache-optimierte Performance** für Übersetzungen
 
 ## 🔧 **ERWEITERTE KONFIGURATION**
 
@@ -170,23 +173,32 @@ priority_languages = {
 
 ## 🚀 **BEISPIEL-WORKFLOW**
 
-### **Szenario: Hauptkategorie "Tiere"**
+### **Szenario: Ordnerstruktur für "Tiere"**
 
-1. **Gemini generiert automatisch:**
+1. **Ihre Ordnerstruktur:**
    ```
-   Subkategorien: ["Haustiere", "Wildtiere", "Meerestiere", "Vögel", "Insekten"]
+   📁 images/
+   ├── Tiere_Hunde/
+   │   ├── hund1.png
+   │   └── hund2.png
+   ├── Tiere_Katzen/
+   │   ├── katze1.png
+   │   └── katze2.png
+   └── Tiere_Vögel/
+       ├── vogel1.png
+       └── vogel2.png
    ```
 
 2. **Automatische Übersetzung in 100 Sprachen:**
    ```json
    {
-     "haustiere": {
-       "de": "Haustiere",
-       "en": "Pets", 
-       "es": "Mascotas",
-       "fr": "Animaux de compagnie",
-       "ja": "ペット",
-       "zh": "宠物",
+     "hunde": {
+       "de": "Hunde",
+       "en": "Dogs", 
+       "es": "Perros",
+       "fr": "Chiens",
+       "ja": "犬",
+       "zh": "狗",
        ...
      }
    }
@@ -195,18 +207,16 @@ priority_languages = {
 3. **Erstellte Firestore-Dokumente:**
    ```
    /categories/tiere (Hauptkategorie)
-   /categories/haustiere (Subkategorie)
-   /categories/wildtiere (Subkategorie)
-   /categories/meerestiere (Subkategorie)
+   /categories/hunde (Subkategorie)
+   /categories/katzen (Subkategorie)
    /categories/voegel (Subkategorie)
-   /categories/insekten (Subkategorie)
    ```
 
 4. **Bilder werden automatisch zugeordnet:**
-   - `tiere_hund.png` → Subkategorie "haustiere"
-   - `tiere_löwe.png` → Subkategorie "wildtiere"
-   - `tiere_delfin.png` → Subkategorie "meerestiere"
+   - `Tiere_Hunde/hund1.png` → Subkategorie "hunde"
+   - `Tiere_Katzen/katze1.png` → Subkategorie "katzen"
+   - `Tiere_Vögel/vogel1.png` → Subkategorie "voegel"
 
 ---
 
-**Status: ✅ BEHOBEN & KI-OPTIMIERT** - Ihre Firebase-Daten sind jetzt vollständig kompatibel mit der Flutter-App und nutzen KI für optimale Kategorisierung!
+**Status: ✅ BEHOBEN & ORDNERSTRUKTUR-OPTIMIERT** - Ihre Firebase-Daten sind jetzt vollständig kompatibel mit der Flutter-App und nutzen Ihre Ordnerstruktur für präzise Kategorisierung!

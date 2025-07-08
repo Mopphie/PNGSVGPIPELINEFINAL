@@ -299,58 +299,7 @@ def translate_batch(title: str, tags: List[str], lang_name: str, lang_code: str)
     for o, n in zip(tags, tr_tags):
         cache.set(o, lang_code, n)
     return tr_title, tr_tags
-@smart_retry()
-def generate_subcategories_with_gemini(main_category: str) -> List[str]:
-    """
-    Generiert automatisch sinnvolle Subkategorien für eine Hauptkategorie mit Gemini
-    """
-    prompt = f"""
-    Für die Ausmalbilder-App-Kategorie "{main_category}" generiere 3-5 sinnvolle Subkategorien.
-    
-    Antworte NUR mit einer kommagetrennten Liste von Subkategorien, keine Erklärungen:
-    
-    Beispiel für "Tiere": Haustiere, Wildtiere, Meerestiere, Vögel, Insekten
-    Beispiel für "Fahrzeuge": Autos, Flugzeuge, Schiffe, Züge, Motorräder
-    
-    Kategorie: {main_category}
-    """
-    
-    resp = MODEL_TRANS.generate_content(prompt)
-    subcategories_text = resp.text.strip()
-    
-    # Parse die Antwort
-    subcategories = [cat.strip() for cat in subcategories_text.split(',') if cat.strip()]
-    
-    # Fallback falls Gemini keine gute Antwort gibt
-    if not subcategories:
-        subcategories = ["Allgemein", "Einfach", "Komplex"]
-    
-    log.info("Generierte Subkategorien für '%s': %s", main_category, subcategories)
-    return subcategories
 
-def translate_subcategories_to_all_languages(subcategories: List[str]) -> Dict[str, Dict[str, str]]:
-    """
-    Übersetzt eine Liste von Subkategorien in alle 100 verfügbaren Sprachen
-    """
-    translations = {}
-    
-    for subcategory in subcategories:
-        subcategory_id = re.sub(r"[^a-z0-9]+", "-", subcategory.lower())
-        translations[subcategory_id] = {"de": subcategory}  # Deutsch als Basis
-        
-        # Übersetze in alle verfügbaren Sprachen
-        for lang_name, lang_code in LANG_MAP.items():
-            if lang_code == "de":
-                continue
-                
-            try:
-                translated_name, _ = translate_batch(subcategory, [], lang_name, lang_code)
-                translations[subcategory_id][lang_code] = translated_name
-            except Exception as e:
-                log.warning("Übersetzung von '%s' nach %s fehlgeschlagen: %s", subcategory, lang_name, e)
-                translations[subcategory_id][lang_code] = subcategory  # Fallback
-    
-    return translations
 # ──────────────── INKSCAPE-HILFSFUNKTIONEN ────────────────
 def check_inkscape():
     log.info("Prüfe Inkscape 1.2-Kompatibilität...")
@@ -534,10 +483,11 @@ def translate_category_name(category_name: str) -> Dict[str, str]:
             translations[lang_code] = category_name  # Fallback zur ursprünglichen Sprache
     
     return translations
-# KORRIGIERT: Kategorien mit Gemini-generierten Subkategorien für Flutter-App
+# KORRIGIERT: Kategorien basierend auf Ordnerstruktur (maincat_subcat)
 def create_categories(main_cat: str, sub_cat: str) -> str:
     """
-    Erstellt Kategorien mit automatisch generierten Subkategorien via Gemini API
+    Erstellt Kategorien basierend auf Ordnerstruktur maincat_subcat
+    Subkategorie wird in alle 100 Sprachen übersetzt
     """
     _initialize_services()
     
@@ -557,101 +507,73 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
     else:
         age_group = "6-12"  # Standard-Altersgruppe
     
-    main_cat_ref = _db.collection("categories").document(main_cat_id)
+    # Subkategorie basierend auf Ordnername erstellen
+    sub_cat_id = re.sub(r"[^a-z0-9]+", "-", sub_cat.lower())
     
-    # Prüfe ob Hauptkategorie schon existiert
-    if not main_cat_ref.get().exists:
-        log.info("Generiere Subkategorien für '%s' mit Gemini...", main_cat)
-        
-        # 1. Generiere Subkategorien mit Gemini
-        subcategories_list = generate_subcategories_with_gemini(main_cat)
-        
-        # 2. Übersetze alle Subkategorien in alle 100 Sprachen
-        subcategories_translations = translate_subcategories_to_all_languages(subcategories_list)
-        
-        # 3. Erstelle Subkategorie-Dokumente
-        subcategory_ids = []
-        for subcategory_id, names in subcategories_translations.items():
-            subcategory_doc = {
-                "id": subcategory_id,
-                "names": names,  # Vollständige Übersetzungen in alle Sprachen
-                "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{subcategory_id}.png",
-                "subcategoryIds": [],  # Leer für Subkategorien
-                "ageGroup": age_group,
-                "parentCategoryId": main_cat_id,
-                "order": len(subcategory_ids)  # Reihenfolge basierend auf Position
-            }
+    # Übersetze Subkategorie in alle 100 Sprachen
+    log.info("Übersetze Subkategorie '%s' in alle 100 Sprachen...", sub_cat)
+    sub_cat_translations = {}
+    sub_cat_translations["de"] = sub_cat  # Deutsch als Basis
+    
+    # Übersetze in alle verfügbaren Sprachen
+    for lang_name, lang_code in LANG_MAP.items():
+        if lang_code == "de":
+            continue
             
-            # Subkategorie erstellen
-            sub_ref = _db.collection("categories").document(subcategory_id)
-            sub_ref.set(subcategory_doc)
-            subcategory_ids.append(subcategory_id)
-            
-            log.info("Subkategorie erstellt: %s (%s)", subcategory_id, names.get("de", ""))
-        
-        # 4. Hauptkategorie mit Subkategorie-IDs erstellen
+        try:
+            translated_name, _ = translate_batch(sub_cat, [], lang_name, lang_code)
+            sub_cat_translations[lang_code] = translated_name
+        except Exception as e:
+            log.warning("Übersetzung von '%s' nach %s fehlgeschlagen: %s", sub_cat, lang_name, e)
+            sub_cat_translations[lang_code] = sub_cat  # Fallback
+    
+    # Erstelle Subkategorie-Dokument
+    sub_cat_doc = {
+        "id": sub_cat_id,
+        "names": sub_cat_translations,  # Vollständige Übersetzungen in alle Sprachen
+        "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{sub_cat_id}.png",
+        "subcategoryIds": [],  # Leer für Subkategorien
+        "ageGroup": age_group,
+        "parentCategoryId": main_cat_id,
+        "order": 0
+    }
+    
+    # Subkategorie erstellen (nur wenn noch nicht existiert)
+    sub_cat_ref = _db.collection("categories").document(sub_cat_id)
+    if not sub_cat_ref.get().exists:
+        sub_cat_ref.set(sub_cat_doc)
+        log.info("Subkategorie erstellt: %s (%s)", sub_cat_id, sub_cat)
+    
+    # Hauptkategorie erstellen/aktualisieren
+    main_cat_ref = _db.collection("categories").document(main_cat_id)
+    main_cat_data = main_cat_ref.get()
+    
+    if not main_cat_data.exists:
+        # Neue Hauptkategorie erstellen
         main_cat_doc = {
             "id": main_cat_id,
             "names": main_cat_names,
             "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{main_cat_id}.png",
-            "subcategoryIds": subcategory_ids,  # Reine Subkategorie-IDs
+            "subcategoryIds": [sub_cat_id],  # Reine Subkategorie-ID
             "ageGroup": age_group,
             "parentCategoryId": "",
             "order": 0
         }
         
         main_cat_ref.set(main_cat_doc)
-        log.info("Hauptkategorie '%s' erstellt mit %d Subkategorien: %s", 
-                main_cat, len(subcategory_ids), subcategory_ids)
-    
-    # Finde die passende Subkategorie für das aktuelle Bild
-    main_cat_data = main_cat_ref.get().to_dict()
-    subcategory_ids = main_cat_data.get("subcategoryIds", [])
-    
-    # Verwende die erste Subkategorie als Standard, oder erstelle eine basierend auf sub_cat
-    if subcategory_ids:
-        # Prüfe ob sub_cat einer existierenden Subkategorie entspricht
-        sub_cat_normalized = re.sub(r"[^a-z0-9]+", "-", sub_cat.lower())
-        
-        # Suche nach passender Subkategorie
-        matching_subcategory = None
-        for subcat_id in subcategory_ids:
-            subcat_ref = _db.collection("categories").document(subcat_id)
-            subcat_data = subcat_ref.get().to_dict()
-            if subcat_data:
-                # Prüfe ob sub_cat zu einer der übersetzten Namen passt
-                for lang_code, translated_name in subcat_data.get("names", {}).items():
-                    if sub_cat_normalized in re.sub(r"[^a-z0-9]+", "-", translated_name.lower()):
-                        matching_subcategory = subcat_id
-                        break
-                if matching_subcategory:
-                    break
-        
-        return matching_subcategory or subcategory_ids[0]  # Fallback zur ersten Subkategorie
+        log.info("Hauptkategorie '%s' erstellt mit Subkategorie: %s", main_cat, sub_cat_id)
     else:
-        # Fallback: Erstelle eine einfache Subkategorie falls keine existiert
-        simple_sub_id = re.sub(r"[^a-z0-9]+", "-", sub_cat.lower())
-        sub_cat_names = translate_category_name(sub_cat)
+        # Hauptkategorie existiert bereits - Subkategorie hinzufügen falls nicht vorhanden
+        existing_data = main_cat_data.to_dict()
+        existing_subcategories = existing_data.get("subcategoryIds", [])
         
-        sub_cat_doc = {
-            "id": simple_sub_id,
-            "names": sub_cat_names,
-            "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{simple_sub_id}.png",
-            "subcategoryIds": [],
-            "ageGroup": age_group,
-            "parentCategoryId": main_cat_id,
-            "order": 0
-        }
-        
-        _db.collection("categories").document(simple_sub_id).set(sub_cat_doc)
-        
-        # Zur Hauptkategorie hinzufügen
-        main_cat_ref.update({
-            "subcategoryIds": firestore.ArrayUnion([simple_sub_id])
-        })
-        
-        log.info("Fallback-Subkategorie erstellt: %s", simple_sub_id)
-        return simple_sub_id
+        if sub_cat_id not in existing_subcategories:
+            main_cat_ref.update({
+                "subcategoryIds": firestore.ArrayUnion([sub_cat_id])
+            })
+            log.info("Subkategorie '%s' zu Hauptkategorie '%s' hinzugefügt", sub_cat_id, main_cat_id)
+    
+    return sub_cat_id
 # ───────────────────────── WORKER ───────────────────────────
 def process_png(png_path: Path, main_cat: str, sub_cat: str):
     log.info("Starte Verarbeitung von Bild: %s (Kategorie: %s/%s)", png_path.name, main_cat, sub_cat)

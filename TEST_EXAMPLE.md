@@ -1,28 +1,34 @@
-# Test-Beispiel: Gemini-generierte Subkategorien
+# Test-Beispiel: Ordnerstruktur-basierte Subkategorien
 
 ## 🧪 **Test-Szenario**
 
 ### **Ordnerstruktur:**
 ```
 images/
-├── Tiere_Hund/
+├── Tiere_Hunde/
 │   ├── hund1.png
 │   ├── hund2.png
-│   └── katze1.png
-├── Fahrzeuge_Auto/
+│   └── beagle1.png
+├── Tiere_Katzen/
+│   ├── katze1.png
+│   └── perser1.png
+├── Fahrzeuge_Autos/
 │   ├── auto1.png
-│   └── flugzeug1.png
-└── Märchen_Prinzessin/
+│   └── sportwagen1.png
+├── Fahrzeuge_Flugzeuge/
+│   ├── flugzeug1.png
+│   └── jet1.png
+└── Märchen_Prinzessinnen/
     ├── prinzessin1.png
-    └── drache1.png
+    └── königin1.png
 ```
 
-## 🤖 **Gemini-Generierung**
+## 🏗️ **Automatische Verarbeitung**
 
 ### **1. Kategorie "Tiere"**
 ```
-Gemini Input: "Für die Ausmalbilder-App-Kategorie 'Tiere' generiere 3-5 sinnvolle Subkategorien."
-Gemini Output: "Haustiere, Wildtiere, Meerestiere, Vögel, Insekten"
+Ordner: "Tiere_Hunde" → Subkategorie: "Hunde"
+Ordner: "Tiere_Katzen" → Subkategorie: "Katzen"
 ```
 
 **Ergebnis:**
@@ -35,14 +41,14 @@ Gemini Output: "Haustiere, Wildtiere, Meerestiere, Vögel, Insekten"
     "es": "Animales",
     "fr": "Animaux"
   },
-  "subcategoryIds": ["haustiere", "wildtiere", "meerestiere", "voegel", "insekten"]
+  "subcategoryIds": ["hunde", "katzen"]
 }
 ```
 
 ### **2. Kategorie "Fahrzeuge"**
 ```
-Gemini Input: "Für die Ausmalbilder-App-Kategorie 'Fahrzeuge' generiere 3-5 sinnvolle Subkategorien."
-Gemini Output: "Autos, Flugzeuge, Schiffe, Züge, Motorräder"
+Ordner: "Fahrzeuge_Autos" → Subkategorie: "Autos"
+Ordner: "Fahrzeuge_Flugzeuge" → Subkategorie: "Flugzeuge"
 ```
 
 **Ergebnis:**
@@ -55,14 +61,13 @@ Gemini Output: "Autos, Flugzeuge, Schiffe, Züge, Motorräder"
     "es": "Vehículos",
     "fr": "Véhicules"
   },
-  "subcategoryIds": ["autos", "flugzeuge", "schiffe", "zuege", "motorraeder"]
+  "subcategoryIds": ["autos", "flugzeuge"]
 }
 ```
 
 ### **3. Kategorie "Märchen"**
 ```
-Gemini Input: "Für die Ausmalbilder-App-Kategorie 'Märchen' generiere 3-5 sinnvolle Subkategorien."
-Gemini Output: "Prinzessinnen, Drachen, Zauberer, Feen, Ritter"
+Ordner: "Märchen_Prinzessinnen" → Subkategorie: "Prinzessinnen"
 ```
 
 **Ergebnis:**
@@ -75,7 +80,7 @@ Gemini Output: "Prinzessinnen, Drachen, Zauberer, Feen, Ritter"
     "es": "Cuentos de hadas",
     "fr": "Contes de fées"
   },
-  "subcategoryIds": ["prinzessinnen", "drachen", "zauberer", "feen", "ritter"]
+  "subcategoryIds": ["prinzessinnen"]
 }
 ```
 
@@ -84,32 +89,22 @@ Gemini Output: "Prinzessinnen, Drachen, Zauberer, Feen, Ritter"
 ### **Kategorien:**
 ```
 /categories/tiere
-/categories/haustiere
-/categories/wildtiere
-/categories/meerestiere
-/categories/voegel
-/categories/insekten
+/categories/hunde
+/categories/katzen
 
 /categories/fahrzeuge
 /categories/autos
 /categories/flugzeuge
-/categories/schiffe
-/categories/zuege
-/categories/motorraeder
 
 /categories/maerchen
 /categories/prinzessinnen
-/categories/drachen
-/categories/zauberer
-/categories/feen
-/categories/ritter
 ```
 
 ### **Bilder:**
 ```
 /images/hund1-abc123
 {
-  "categoryId": "haustiere",  // Reine Subkategorie-ID
+  "categoryId": "hunde",  // Reine Subkategorie-ID
   "titles": {
     "de": "Süßer Hund",
     "en": "Cute Dog",
@@ -130,10 +125,10 @@ Gemini Output: "Prinzessinnen, Drachen, Zauberer, Feen, Ritter"
 
 ## 🎯 **Vorteile**
 
-1. **Intelligente Kategorisierung**: Gemini schlägt sinnvolle Subkategorien vor
-2. **Reine IDs**: Keine verschachtelten IDs mehr (z.B. "haustiere" statt "tiere-haustiere")
+1. **Ordnerstruktur-basiert**: Sie bestimmen die Subkategorien durch Ihre Ordnernamen
+2. **Reine IDs**: Keine verschachtelten IDs mehr (z.B. "hunde" statt "tiere-hunde")
 3. **100-Sprachen-Support**: Alle Kategorien automatisch übersetzt
-4. **Smart Matching**: Bilder werden automatisch der passenden Subkategorie zugeordnet
+4. **Direkte Zuordnung**: Ein Ordner = Eine Subkategorie
 5. **Konsistente Struktur**: Einheitliche Datenstruktur für die Flutter-App
 
 ## 🚀 **Ausführung**
@@ -144,14 +139,15 @@ python prepare_images.py
 
 **Logs:**
 ```
-INFO | Generiere Subkategorien für 'Tiere' mit Gemini...
-INFO | Generierte Subkategorien für 'Tiere': ['Haustiere', 'Wildtiere', 'Meerestiere', 'Vögel', 'Insekten']
-INFO | Subkategorie erstellt: haustiere (Haustiere)
-INFO | Subkategorie erstellt: wildtiere (Wildtiere)
-INFO | Hauptkategorie 'Tiere' erstellt mit 5 Subkategorien: ['haustiere', 'wildtiere', 'meerestiere', 'voegel', 'insekten']
-INFO | Bild hund1.png wird zu Subkategorie 'haustiere' zugeordnet
+INFO | Übersetze Subkategorie 'Hunde' in alle 100 Sprachen...
+INFO | Subkategorie erstellt: hunde (Hunde)
+INFO | Hauptkategorie 'Tiere' erstellt mit Subkategorie: hunde
+INFO | Übersetze Subkategorie 'Katzen' in alle 100 Sprachen...
+INFO | Subkategorie erstellt: katzen (Katzen)
+INFO | Subkategorie 'katzen' zu Hauptkategorie 'tiere' hinzugefügt
+INFO | Bild hund1.png wird zu Subkategorie 'hunde' zugeordnet
 ```
 
 ---
 
-**✅ Das System funktioniert perfekt mit der neuen KI-optimierten Struktur!**
+**✅ Das System funktioniert perfekt mit Ihrer kontrollierten Ordnerstruktur!**
