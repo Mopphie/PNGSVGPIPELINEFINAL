@@ -441,12 +441,47 @@ def upload(local: Path, blob_name: str, mime: str) -> str:
     blob.upload_from_filename(str(local), content_type=mime)
     log.info("Hochladen erfolgreich: %s", blob_name)
     return blob.name
+
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
             h.update(chunk)
     return h.hexdigest()
+
+def translate_category_name(category_name: str) -> Dict[str, str]:
+    """
+    Übersetzt einen Kategorienamen in alle verfügbaren Sprachen
+    """
+    translations = {"de": category_name}  # Deutsch als Ausgangssprache
+    
+    # Auswahl der wichtigsten Sprachen für Kategorien
+    priority_languages = {
+        "Englisch": "en",
+        "Spanisch": "es", 
+        "Französisch": "fr",
+        "Italienisch": "it",
+        "Portugiesisch": "pt",
+        "Niederländisch": "nl",
+        "Japanisch": "ja",
+        "Koreanisch": "ko",
+        "Mandarin": "zh",
+        "Russisch": "ru",
+        "Arabisch": "ar",
+        "Hindi": "hi",
+        "Türkisch": "tr"
+    }
+    
+    for lang_name, lang_code in priority_languages.items():
+        try:
+            # Verwende die bestehende Übersetzungsfunktion
+            translated_name, _ = translate_batch(category_name, [], lang_name, lang_code)
+            translations[lang_code] = translated_name
+        except Exception as e:
+            log.warning("Übersetzung von '%s' nach %s fehlgeschlagen: %s", category_name, lang_name, e)
+            translations[lang_code] = category_name  # Fallback zur ursprünglichen Sprache
+    
+    return translations
 # KORRIGIERT: Kategorien für Flutter-App kompatible Struktur
 def create_categories(main_cat: str, sub_cat: str) -> str:
     """
@@ -456,9 +491,26 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
     
     # Hauptkategorie erstellen/aktualisieren
     main_cat_id = re.sub(r"[^a-z0-9]+", "-", main_cat.lower())
+    
+    # Multi-language names für Hauptkategorie mit echten Übersetzungen
+    main_cat_names = translate_category_name(main_cat)
+    
+    # Altersgruppe basierend auf Kategorie bestimmen
+    if "kleinkinder" in main_cat.lower() or "0-5" in main_cat:
+        age_group = "0-5"
+    elif "schulkinder" in main_cat.lower() or "6-12" in main_cat:
+        age_group = "6-12"
+    elif "erwachsene" in main_cat.lower() or "jugendliche" in main_cat.lower() or "13-99" in main_cat:
+        age_group = "13-99"
+    else:
+        age_group = "6-12"  # Standard-Altersgruppe
+    
     main_cat_doc = {
         "id": main_cat_id,
-        "nameKey": f"category{main_cat.replace(' ', '').replace('-', '')}",  # KORRIGIERT: nameKey hinzugefügt
+        "names": main_cat_names,  # KORRIGIERT: names statt nameKey
+        "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{main_cat_id}.png",  # KORRIGIERT: iconUrl hinzugefügt
+        "subcategoryIds": [],  # KORRIGIERT: subcategoryIds hinzugefügt (wird später gefüllt)
+        "ageGroup": age_group,  # KORRIGIERT: ageGroup hinzugefügt
         "parentCategoryId": "",  # KORRIGIERT: leerer String statt None
         "order": 0
     }
@@ -471,9 +523,16 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
     
     # Subkategorie erstellen/aktualisieren
     sub_cat_id = f"{main_cat_id}_{re.sub(r'[^a-z0-9]+', '-', sub_cat.lower())}"
+    
+    # Multi-language names für Subkategorie mit echten Übersetzungen
+    sub_cat_names = translate_category_name(sub_cat)
+    
     sub_cat_doc = {
         "id": sub_cat_id,
-        "nameKey": f"category{main_cat.replace(' ', '').replace('-', '')}{sub_cat.replace(' ', '').replace('-', '')}",  # KORRIGIERT: nameKey hinzugefügt
+        "names": sub_cat_names,  # KORRIGIERT: names statt nameKey
+        "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{sub_cat_id}.png",  # KORRIGIERT: iconUrl hinzugefügt
+        "subcategoryIds": [],  # KORRIGIERT: subcategoryIds hinzugefügt (leer für Subkategorien)
+        "ageGroup": age_group,  # KORRIGIERT: ageGroup hinzugefügt
         "parentCategoryId": main_cat_id,  # KORRIGIERT: String statt None
         "order": 0
     }
@@ -483,6 +542,12 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
     if not sub_cat_ref.get().exists:
         sub_cat_ref.set(sub_cat_doc)
         log.info("Subkategorie erstellt: %s", sub_cat)
+        
+        # Subkategorie-ID zur Hauptkategorie hinzufügen
+        main_cat_ref.update({
+            "subcategoryIds": firestore.ArrayUnion([sub_cat_id])
+        })
+        log.info("Subkategorie %s zur Hauptkategorie %s hinzugefügt", sub_cat_id, main_cat_id)
     
     return sub_cat_id
 # ───────────────────────── WORKER ───────────────────────────
