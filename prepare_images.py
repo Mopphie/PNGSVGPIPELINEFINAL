@@ -300,6 +300,77 @@ def translate_batch(title: str, tags: List[str], lang_name: str, lang_code: str)
         cache.set(o, lang_code, n)
     return tr_title, tr_tags
 
+@smart_retry()
+def translate_titles_batch(titles: List[str], lang_name: str, lang_code: str) -> List[str]:
+    """
+    Übersetzt mehrere Titel auf einmal in Batches von 10
+    """
+    # Prüfe Cache für alle Titel
+    cached_translations = []
+    uncached_titles = []
+    uncached_indices = []
+    
+    for i, title in enumerate(titles):
+        cached = cache.get(title, lang_code)
+        if cached:
+            cached_translations.append((i, cached))
+        else:
+            uncached_titles.append(title)
+            uncached_indices.append(i)
+    
+    # Erstelle Ergebnis-Array mit gecachten Übersetzungen
+    result = [None] * len(titles)
+    for i, translation in cached_translations:
+        result[i] = translation
+    
+    # Übersetze nicht-gecachte Titel in Batches von 10
+    if uncached_titles:
+        batch_size = 10
+        for batch_start in range(0, len(uncached_titles), batch_size):
+            batch_titles = uncached_titles[batch_start:batch_start + batch_size]
+            batch_indices = uncached_indices[batch_start:batch_start + batch_size]
+            
+            # Erstelle Prompt für Batch-Übersetzung
+            prompt = f"Übersetze die folgenden Titel ins {lang_name}.\n"
+            prompt += "Antwortformat GENAU so (nummeriert):\n"
+            for i, title in enumerate(batch_titles, 1):
+                prompt += f"{i}. <übersetzter titel>\n"
+            prompt += "\nTitel zu übersetzen:\n"
+            for i, title in enumerate(batch_titles, 1):
+                prompt += f"{i}. {title}\n"
+            
+            try:
+                resp = MODEL_TRANS.generate_content(prompt).text.strip()
+                
+                # Parse die Antwort
+                lines = resp.split('\n')
+                for line in lines:
+                    match = re.match(r'^(\d+)\.\s*(.+)$', line.strip())
+                    if match:
+                        num = int(match.group(1)) - 1  # 0-basierter Index
+                        translation = match.group(2).strip()
+                        if num < len(batch_titles):
+                            original_title = batch_titles[num]
+                            original_index = batch_indices[num]
+                            result[original_index] = translation
+                            cache.set(original_title, lang_code, translation)
+                
+                # Fallback für nicht erfolgreich geparste Titel
+                for i, original_index in enumerate(batch_indices):
+                    if result[original_index] is None:
+                        result[original_index] = batch_titles[i]  # Fallback zum Original
+                        cache.set(batch_titles[i], lang_code, batch_titles[i])
+                        
+            except Exception as e:
+                log.warning("Batch-Übersetzung fehlgeschlagen für %s: %s", lang_name, e)
+                # Fallback: Verwende Original-Titel
+                for i, original_index in enumerate(batch_indices):
+                    if result[original_index] is None:
+                        result[original_index] = batch_titles[i]
+                        cache.set(batch_titles[i], lang_code, batch_titles[i])
+    
+    return result
+
 # ──────────────── INKSCAPE-HILFSFUNKTIONEN ────────────────
 def check_inkscape():
     log.info("Prüfe Inkscape 1.2-Kompatibilität...")
@@ -321,6 +392,7 @@ def check_inkscape():
     except subprocess.CalledProcessError as e:
         log.error("FEHLER: Inkscape --version fehlgeschlagen: %s", e.stderr)
         raise SystemExit("Inkscape --version fehlgeschlagen.")
+
 def check_potrace():
     try:
         subprocess.run(
@@ -435,6 +507,7 @@ def _validate_thumbnail(png_path: Path) -> bool:
 # Tools prüfen
 check_inkscape()
 check_potrace()
+
 # ──────────────── STORAGE & KATEGORIEN ────────────────────
 def upload(local: Path, blob_name: str, mime: str) -> str:
     log.info("Hochladen von %s zu Firebase Storage (%s)...", local.name, blob_name)
@@ -483,6 +556,45 @@ def translate_category_name(category_name: str) -> Dict[str, str]:
             translations[lang_code] = category_name  # Fallback zur ursprünglichen Sprache
     
     return translations
+
+def translate_category_name_batch(category_names: List[str]) -> Dict[str, Dict[str, str]]:
+    """
+    Übersetzt mehrere Kategorienamen auf einmal in alle verfügbaren Sprachen
+    """
+    all_translations = {}
+    
+    for name in category_names:
+        all_translations[name] = {"de": name}  # Deutsch als Ausgangssprache
+    
+    # Auswahl der wichtigsten Sprachen für Kategorien
+    priority_languages = {
+        "Englisch": "en",
+        "Spanisch": "es", 
+        "Französisch": "fr",
+        "Italienisch": "it",
+        "Portugiesisch": "pt",
+        "Niederländisch": "nl",
+        "Japanisch": "ja",
+        "Koreanisch": "ko",
+        "Mandarin": "zh",
+        "Russisch": "ru",
+        "Arabisch": "ar",
+        "Hindi": "hi",
+        "Türkisch": "tr"
+    }
+    
+    for lang_name, lang_code in priority_languages.items():
+        try:
+            # Verwende die neue Batch-Übersetzungsfunktion
+            translated_names = translate_titles_batch(category_names, lang_name, lang_code)
+            for original_name, translated_name in zip(category_names, translated_names):
+                all_translations[original_name][lang_code] = translated_name
+        except Exception as e:
+            log.warning("Batch-Übersetzung von Kategorien nach %s fehlgeschlagen: %s", lang_name, e)
+            for name in category_names:
+                all_translations[name][lang_code] = name  # Fallback zur ursprünglichen Sprache
+    
+    return all_translations
 # KORRIGIERT: Kategorien basierend auf Ordnerstruktur (maincat_subcat)
 def create_categories(main_cat: str, sub_cat: str) -> str:
     """
@@ -515,14 +627,14 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
     sub_cat_translations = {}
     sub_cat_translations["de"] = sub_cat  # Deutsch als Basis
     
-    # Übersetze in alle verfügbaren Sprachen
-    for lang_name, lang_code in LANG_MAP.items():
-        if lang_code == "de":
-            continue
-            
+    # Übersetze in alle verfügbaren Sprachen mit Batch-Übersetzung
+    languages_to_translate = [(lang_name, lang_code) for lang_name, lang_code in LANG_MAP.items() if lang_code != "de"]
+    
+    for lang_name, lang_code in languages_to_translate:
         try:
-            translated_name, _ = translate_batch(sub_cat, [], lang_name, lang_code)
-            sub_cat_translations[lang_code] = translated_name
+            # Verwende die neue Batch-Übersetzungsfunktion für einzelne Titel
+            translated_names = translate_titles_batch([sub_cat], lang_name, lang_code)
+            sub_cat_translations[lang_code] = translated_names[0]
         except Exception as e:
             log.warning("Übersetzung von '%s' nach %s fehlgeschlagen: %s", sub_cat, lang_name, e)
             sub_cat_translations[lang_code] = sub_cat  # Fallback
@@ -575,6 +687,171 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
     
     return sub_cat_id
 # ───────────────────────── WORKER ───────────────────────────
+def process_png_batch(png_files: List[Tuple[Path, str, str]]) -> List[str]:
+    """
+    Verarbeitet mehrere PNG-Dateien zusammen und übersetzt ihre Titel in Batches
+    """
+    log.info("Starte Batch-Verarbeitung von %d Bildern...", len(png_files))
+    _initialize_services()
+    
+    # Sammle alle Titel für Batch-Übersetzung
+    motifs_and_tags = []
+    files_to_process = []
+    
+    for png_path, main_cat, sub_cat in png_files:
+        file_hash = sha256(png_path)
+        if _db.collection("processed_files").document(file_hash).get().exists:
+            log.info("%s wurde bereits verarbeitet (Hash: %s) – übersprungen.", png_path.name, file_hash)
+            continue
+        
+        try:
+            Image.open(png_path).verify()
+        except Exception as e:
+            log.error("Ungültige PNG-Datei %s: %s", png_path.name, e)
+            continue
+        
+        # Analysiere das Bild
+        try:
+            motif_de, tags_de = analyze_image(png_path)
+            motifs_and_tags.append((motif_de, tags_de))
+            files_to_process.append((png_path, main_cat, sub_cat, file_hash))
+            log.info("Analyse für %s: Motiv='%s', Tags='%s'", png_path.name, motif_de, tags_de)
+        except Exception as e:
+            log.error("Gemini-Analyse fehlgeschlagen für %s: %s", png_path.name, e)
+            continue
+    
+    if not files_to_process:
+        log.info("Keine Dateien zur Verarbeitung gefunden.")
+        return []
+    
+    # Extrahiere nur die Titel für Batch-Übersetzung
+    titles_to_translate = [motif for motif, _ in motifs_and_tags]
+    
+    # Übersetze alle Titel in Batches von 10
+    log.info("Übersetze %d Titel in Batches von 10...", len(titles_to_translate))
+    all_translations = {}
+    
+    for lang_name, lang_code in LANG_MAP.items():
+        if lang_code == "de":
+            all_translations[lang_code] = titles_to_translate
+        else:
+            try:
+                translated_titles = translate_titles_batch(titles_to_translate, lang_name, lang_code)
+                all_translations[lang_code] = translated_titles
+            except Exception as e:
+                log.warning("Batch-Übersetzung nach %s fehlgeschlagen: %s", lang_name, e)
+                all_translations[lang_code] = titles_to_translate  # Fallback
+    
+    log.info("Batch-Übersetzung abgeschlossen.")
+    
+    # Verarbeite jede Datei einzeln mit den bereits übersetzten Titeln
+    results = []
+    for i, (png_path, main_cat, sub_cat, file_hash) in enumerate(files_to_process):
+        try:
+            motif_de, tags_de = motifs_and_tags[i]
+            
+            # Erstelle Übersetzungs-Dictionary für diese Datei
+            translations = {}
+            for lang_code in LANG_MAP.values():
+                if lang_code == "de":
+                    translations[lang_code] = {"title": motif_de, "tags": tags_de}
+                else:
+                    # Verwende die bereits übersetzten Titel
+                    translated_title = all_translations[lang_code][i]
+                    # Für Tags verwende die alte Einzelübersetzung
+                    try:
+                        _, translated_tags = translate_batch(motif_de, tags_de, 
+                                                           list(LANG_MAP.keys())[list(LANG_MAP.values()).index(lang_code)], 
+                                                           lang_code)
+                        translations[lang_code] = {"title": translated_title, "tags": translated_tags}
+                    except Exception as e:
+                        log.warning("Tag-Übersetzung für %s fehlgeschlagen: %s", lang_code, e)
+                        translations[lang_code] = {"title": translated_title, "tags": tags_de}
+            
+            # Verarbeite die Datei (SVG/Thumbnail erstellen, etc.)
+            result = process_single_image(png_path, main_cat, sub_cat, file_hash, translations)
+            results.append(result)
+            
+        except Exception as e:
+            log.error("Fehler bei Verarbeitung von %s: %s", png_path.name, e)
+            results.append("failed")
+    
+    return results
+
+def process_single_image(png_path: Path, main_cat: str, sub_cat: str, file_hash: str, translations: Dict) -> str:
+    """
+    Verarbeitet eine einzelne Bilddatei mit bereits vorbereiteten Übersetzungen
+    """
+    log.info("Verarbeite %s (Kategorie: %s/%s)", png_path.name, main_cat, sub_cat)
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        svg_raw = tmp_path / "raw.svg"
+        svg_a4 = tmp_path / "a4.svg"
+        thumb_png = tmp_path / "thumb.png"
+
+        # SVG-Verarbeitung
+        trace_png_to_svg(png_path, svg_raw)
+        create_a4_canvas(svg_raw, svg_a4)
+        create_thumbnail(svg_a4, thumb_png)
+
+        # Qualitätsprüfung
+        if not (_validate_svg(svg_a4) and _validate_thumbnail(thumb_png)):
+            raise ValueError("Qualitätsprüfung fehlgeschlagen")
+
+        # Slug für eindeutige Dateinamen
+        motif_de = translations["de"]["title"]
+        slug = re.sub(r"[^a-z0-9]+", "-", motif_de.lower())
+        slug = slug[:50].strip('-') or "bild"
+        slug += "-" + uuid.uuid4().hex[:6]
+        
+        svg_blob_name = f"{main_cat}/{sub_cat}/{slug}.svg"
+        png_blob_name = f"{main_cat}/{sub_cat}/{slug}.png"
+        
+        # Upload zu Firebase
+        upload(svg_a4, svg_blob_name, "image/svg+xml")
+        upload(thumb_png, png_blob_name, "image/png")
+        
+        # Erstelle Kategorien
+        category_id = create_categories(main_cat, sub_cat)
+        
+        # Altersgruppe bestimmen
+        if "kleinkinder" in main_cat.lower() or "0-5" in main_cat:
+            age_group = "0-5"
+        elif "schulkinder" in main_cat.lower() or "6-12" in main_cat:
+            age_group = "6-12"
+        elif "erwachsene" in main_cat.lower() or "jugendliche" in main_cat.lower() or "13-99" in main_cat:
+            age_group = "13-99"
+        else:
+            age_group = "6-12"
+        
+        # Sammle alle Tags
+        all_tags = set()
+        for lang_code, translation_data in translations.items():
+            all_tags.update(translation_data["tags"])
+        combined_tags = list(all_tags)
+        
+        # Speichere in Firestore
+        image_doc = {
+            "id": slug,
+            "titles": {lc: d["title"] for lc, d in translations.items()},
+            "ageGroup": age_group,
+            "tags": combined_tags,
+            "thumbnailPath": png_blob_name,
+            "svgPath": svg_blob_name,
+            "categoryId": category_id,
+            "isNew": True,
+            "popularity": 0,
+            "timestamp": firestore.SERVER_TIMESTAMP,
+        }
+        
+        _db.collection("images").document(slug).set(image_doc)
+        _db.collection("processed_files").document(file_hash).set({"ts": firestore.SERVER_TIMESTAMP})
+        
+        png_path.unlink(missing_ok=True)
+        log.info("Bild %s erfolgreich verarbeitet", png_path.name)
+        return "processed"
+
 def process_png(png_path: Path, main_cat: str, sub_cat: str):
     log.info("Starte Verarbeitung von Bild: %s (Kategorie: %s/%s)", png_path.name, main_cat, sub_cat)
     _initialize_services()
@@ -594,12 +871,24 @@ def process_png(png_path: Path, main_cat: str, sub_cat: str):
     log.info("Analyse abgeschlossen: Motiv='%s', Tags='%s'", motif_de, tags_de)
     log.info("Schritt 2: Übersetze Metadaten...")
     translations = {}
-    for lang_name, lang_code in LANG_MAP.items():
-        if lang_code == "de":
-            translations[lang_code] = {"title": motif_de, "tags": tags_de}
-        else:
-            translated_title, translated_tags = translate_batch(motif_de, tags_de, lang_name, lang_code)
+    translations["de"] = {"title": motif_de, "tags": tags_de}
+    
+    # Übersetze Titel in Batches für alle anderen Sprachen
+    languages_to_translate = [(lang_name, lang_code) for lang_name, lang_code in LANG_MAP.items() if lang_code != "de"]
+    
+    for lang_name, lang_code in languages_to_translate:
+        try:
+            # Verwende die neue Batch-Übersetzungsfunktion für den Titel
+            translated_titles = translate_titles_batch([motif_de], lang_name, lang_code)
+            translated_title = translated_titles[0]
+            
+            # Für Tags verwende die alte Einzelübersetzung, da sie komplexer ist
+            _, translated_tags = translate_batch(motif_de, tags_de, lang_name, lang_code)
+            
             translations[lang_code] = {"title": translated_title, "tags": translated_tags}
+        except Exception as e:
+            log.warning("Übersetzung von '%s' nach %s fehlgeschlagen: %s", motif_de, lang_name, e)
+            translations[lang_code] = {"title": motif_de, "tags": tags_de}
     log.info("Übersetzungen abgeschlossen.")
     log.info("Schritt 3: Erstelle SVG und Thumbnail...")
     with tempfile.TemporaryDirectory() as tmp:
@@ -684,6 +973,9 @@ def main():
         log.error("FEHLER: Basis-Ordner nicht gefunden: %s", BASE_IMAGE_DIRECTORY)
         return
     
+    # Sammle alle Kategorien für Batch-Übersetzung
+    categories_to_translate = set()
+    
     for folder in BASE_IMAGE_DIRECTORY.iterdir():
         if folder.is_dir():
             parts = folder.name.split("_")
@@ -699,6 +991,9 @@ def main():
                 log.info("Keine PNGs in Ordner '%s'.", folder.name)
                 continue
             
+            categories_to_translate.add(main_cat)
+            categories_to_translate.add(sub_cat)
+            
             for p in png_files_in_folder:
                 files_to_process.append((p, main_cat, sub_cat))
             
@@ -711,23 +1006,47 @@ def main():
         log.info("Keine PNGs gefunden. Beende.")
         return
     
-    log.info("Beginne Verarbeitung von %d Bildern mit %d parallelen Prozessen...", 
-             len(files_to_process), MAX_PARALLEL)
+    # Übersetze alle Kategorien in Batches vorab
+    if categories_to_translate:
+        log.info("Übersetze %d Kategorien in Batches...", len(categories_to_translate))
+        category_list = list(categories_to_translate)
+        batch_translated_categories = translate_category_name_batch(category_list)
+        log.info("Kategorien-Übersetzung abgeschlossen.")
+        
+        # Speichere die Übersetzungen im Cache für später
+        for category_name, translations in batch_translated_categories.items():
+            for lang_code, translation in translations.items():
+                cache.set(category_name, lang_code, translation)
+    
+    log.info("Beginne Batch-Verarbeitung von %d Bildern...", len(files_to_process))
     
     stats = {"processed": 0, "skipped": 0, "failed": 0}
     
-    with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
-        futures = {pool.submit(process_png, p, mc, sc): p.name for p, mc, sc in files_to_process}
-        for fut in as_completed(futures):
-            png_name = futures[fut]
-            try:
-                res = fut.result()
-                stats[res] += 1
-                log.info("Status für %s: %s", png_name, res.upper())
-            except Exception as e:
-                stats["failed"] += 1
-                log.error("Unerwarteter Fehler für %s: %s", png_name, e)
-
+    # Verarbeite Dateien in Batches von 10 für optimale Übersetzungseffizienz
+    batch_size = 10
+    total_batches = (len(files_to_process) + batch_size - 1) // batch_size
+    
+    for batch_num in range(total_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min(start_idx + batch_size, len(files_to_process))
+        batch_files = files_to_process[start_idx:end_idx]
+        
+        log.info("Verarbeite Batch %d/%d (%d Dateien)...", batch_num + 1, total_batches, len(batch_files))
+        
+        try:
+            batch_results = process_png_batch(batch_files)
+            
+            # Aktualisiere Statistiken
+            for result in batch_results:
+                if result in stats:
+                    stats[result] += 1
+                else:
+                    stats["failed"] += 1
+                    
+        except Exception as e:
+            log.error("Fehler bei Batch-Verarbeitung %d: %s", batch_num + 1, e)
+            stats["failed"] += len(batch_files)
+    
     log.info("VERARBEITUNG ABGESCHLOSSEN – Statistik: %s", stats)
 
 # Hilfsfunktionen bleiben gleich (vereinfacht für Beispiel)
