@@ -299,6 +299,7 @@ def translate_batch(title: str, tags: List[str], lang_name: str, lang_code: str)
     for o, n in zip(tags, tr_tags):
         cache.set(o, lang_code, n)
     return tr_title, tr_tags
+
 # ──────────────── INKSCAPE-HILFSFUNKTIONEN ────────────────
 def check_inkscape():
     log.info("Prüfe Inkscape 1.2-Kompatibilität...")
@@ -441,48 +442,136 @@ def upload(local: Path, blob_name: str, mime: str) -> str:
     blob.upload_from_filename(str(local), content_type=mime)
     log.info("Hochladen erfolgreich: %s", blob_name)
     return blob.name
+
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
             h.update(chunk)
     return h.hexdigest()
-# KORRIGIERT: Kategorien für Flutter-App kompatible Struktur
+
+def translate_category_name(category_name: str) -> Dict[str, str]:
+    """
+    Übersetzt einen Kategorienamen in alle verfügbaren Sprachen
+    """
+    translations = {"de": category_name}  # Deutsch als Ausgangssprache
+    
+    # Auswahl der wichtigsten Sprachen für Kategorien
+    priority_languages = {
+        "Englisch": "en",
+        "Spanisch": "es", 
+        "Französisch": "fr",
+        "Italienisch": "it",
+        "Portugiesisch": "pt",
+        "Niederländisch": "nl",
+        "Japanisch": "ja",
+        "Koreanisch": "ko",
+        "Mandarin": "zh",
+        "Russisch": "ru",
+        "Arabisch": "ar",
+        "Hindi": "hi",
+        "Türkisch": "tr"
+    }
+    
+    for lang_name, lang_code in priority_languages.items():
+        try:
+            # Verwende die bestehende Übersetzungsfunktion
+            translated_name, _ = translate_batch(category_name, [], lang_name, lang_code)
+            translations[lang_code] = translated_name
+        except Exception as e:
+            log.warning("Übersetzung von '%s' nach %s fehlgeschlagen: %s", category_name, lang_name, e)
+            translations[lang_code] = category_name  # Fallback zur ursprünglichen Sprache
+    
+    return translations
+# KORRIGIERT: Kategorien basierend auf Ordnerstruktur (maincat_subcat)
 def create_categories(main_cat: str, sub_cat: str) -> str:
     """
-    Erstellt Kategorien in flacher Struktur für Flutter-App Kompatibilität
+    Erstellt Kategorien basierend auf Ordnerstruktur maincat_subcat
+    Subkategorie wird in alle 100 Sprachen übersetzt
     """
     _initialize_services()
     
     # Hauptkategorie erstellen/aktualisieren
     main_cat_id = re.sub(r"[^a-z0-9]+", "-", main_cat.lower())
-    main_cat_doc = {
-        "id": main_cat_id,
-        "nameKey": f"category{main_cat.replace(' ', '').replace('-', '')}",  # KORRIGIERT: nameKey hinzugefügt
-        "parentCategoryId": "",  # KORRIGIERT: leerer String statt None
-        "order": 0
-    }
     
-    # Nur setzen wenn noch nicht existiert
-    main_cat_ref = _db.collection("categories").document(main_cat_id)
-    if not main_cat_ref.get().exists:
-        main_cat_ref.set(main_cat_doc)
-        log.info("Hauptkategorie erstellt: %s", main_cat)
+    # Multi-language names für Hauptkategorie mit echten Übersetzungen
+    main_cat_names = translate_category_name(main_cat)
     
-    # Subkategorie erstellen/aktualisieren
-    sub_cat_id = f"{main_cat_id}_{re.sub(r'[^a-z0-9]+', '-', sub_cat.lower())}"
+    # Altersgruppe basierend auf Kategorie bestimmen
+    if "kleinkinder" in main_cat.lower() or "0-5" in main_cat:
+        age_group = "0-5"
+    elif "schulkinder" in main_cat.lower() or "6-12" in main_cat:
+        age_group = "6-12"
+    elif "erwachsene" in main_cat.lower() or "jugendliche" in main_cat.lower() or "13-99" in main_cat:
+        age_group = "13-99"
+    else:
+        age_group = "6-12"  # Standard-Altersgruppe
+    
+    # Subkategorie basierend auf Ordnername erstellen
+    sub_cat_id = re.sub(r"[^a-z0-9]+", "-", sub_cat.lower())
+    
+    # Übersetze Subkategorie in alle 100 Sprachen
+    log.info("Übersetze Subkategorie '%s' in alle 100 Sprachen...", sub_cat)
+    sub_cat_translations = {}
+    sub_cat_translations["de"] = sub_cat  # Deutsch als Basis
+    
+    # Übersetze in alle verfügbaren Sprachen
+    for lang_name, lang_code in LANG_MAP.items():
+        if lang_code == "de":
+            continue
+            
+        try:
+            translated_name, _ = translate_batch(sub_cat, [], lang_name, lang_code)
+            sub_cat_translations[lang_code] = translated_name
+        except Exception as e:
+            log.warning("Übersetzung von '%s' nach %s fehlgeschlagen: %s", sub_cat, lang_name, e)
+            sub_cat_translations[lang_code] = sub_cat  # Fallback
+    
+    # Erstelle Subkategorie-Dokument
     sub_cat_doc = {
         "id": sub_cat_id,
-        "nameKey": f"category{main_cat.replace(' ', '').replace('-', '')}{sub_cat.replace(' ', '').replace('-', '')}",  # KORRIGIERT: nameKey hinzugefügt
-        "parentCategoryId": main_cat_id,  # KORRIGIERT: String statt None
+        "names": sub_cat_translations,  # Vollständige Übersetzungen in alle Sprachen
+        "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{sub_cat_id}.png",
+        "subcategoryIds": [],  # Leer für Subkategorien
+        "ageGroup": age_group,
+        "parentCategoryId": main_cat_id,
         "order": 0
     }
     
-    # Nur setzen wenn noch nicht existiert
+    # Subkategorie erstellen (nur wenn noch nicht existiert)
     sub_cat_ref = _db.collection("categories").document(sub_cat_id)
     if not sub_cat_ref.get().exists:
         sub_cat_ref.set(sub_cat_doc)
-        log.info("Subkategorie erstellt: %s", sub_cat)
+        log.info("Subkategorie erstellt: %s (%s)", sub_cat_id, sub_cat)
+    
+    # Hauptkategorie erstellen/aktualisieren
+    main_cat_ref = _db.collection("categories").document(main_cat_id)
+    main_cat_data = main_cat_ref.get()
+    
+    if not main_cat_data.exists:
+        # Neue Hauptkategorie erstellen
+        main_cat_doc = {
+            "id": main_cat_id,
+            "names": main_cat_names,
+            "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{main_cat_id}.png",
+            "subcategoryIds": [sub_cat_id],  # Reine Subkategorie-ID
+            "ageGroup": age_group,
+            "parentCategoryId": "",
+            "order": 0
+        }
+        
+        main_cat_ref.set(main_cat_doc)
+        log.info("Hauptkategorie '%s' erstellt mit Subkategorie: %s", main_cat, sub_cat_id)
+    else:
+        # Hauptkategorie existiert bereits - Subkategorie hinzufügen falls nicht vorhanden
+        existing_data = main_cat_data.to_dict()
+        existing_subcategories = existing_data.get("subcategoryIds", [])
+        
+        if sub_cat_id not in existing_subcategories:
+            main_cat_ref.update({
+                "subcategoryIds": firestore.ArrayUnion([sub_cat_id])
+            })
+            log.info("Subkategorie '%s' zu Hauptkategorie '%s' hinzugefügt", sub_cat_id, main_cat_id)
     
     return sub_cat_id
 # ───────────────────────── WORKER ───────────────────────────
@@ -570,7 +659,7 @@ def process_png(png_path: Path, main_cat: str, sub_cat: str):
             "tags": combined_tags,  # KORRIGIERT: tags als Liste statt Dictionary
             "thumbnailPath": png_blob_name,  # Pfad für Flutter-App
             "svgPath": svg_blob_name,        # Pfad für Flutter-App
-            "categoryId": category_id,       # Direkte Referenz zur Kategorie
+            "categoryId": category_id,       # Direkte Referenz zur Subkategorie (reine ID)
             "isNew": True,
             "popularity": 0,
             "timestamp": firestore.SERVER_TIMESTAMP,  # KORRIGIERT: korrekte Timestamp-Verwendung
