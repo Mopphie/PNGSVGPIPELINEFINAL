@@ -549,15 +549,18 @@ def process_png(png_path: Path, main_cat: str, sub_cat: str):
         # Altersgruppe basierend auf Kategorie bestimmen
         if "kleinkinder" in main_cat.lower() or "0-5" in main_cat:
             age_group = "0-5"
-        elif "schulkinder" in main_cat.lower() or "6-13" in main_cat:
-            age_group = "6-13"
-        elif "jugendliche" in main_cat.lower() or "14-99" in main_cat:
-            age_group = "14-99"
+        elif "schulkinder" in main_cat.lower() or "6-12" in main_cat:
+            age_group = "6-12"
+        elif "erwachsene" in main_cat.lower() or "jugendliche" in main_cat.lower() or "13-99" in main_cat:
+            age_group = "13-99"
         else:
-            age_group = "6-13"  # Standard-Altersgruppe
+            age_group = "6-12"  # Standard-Altersgruppe
         
-        # Tags zu einfacher Liste zusammenfassen (Deutsch und Englisch)
-        combined_tags = list(set(translations["de"]["tags"] + translations["en"]["tags"]))
+        # Tags in ALLEN 100 Sprachen sammeln
+        all_tags = set()
+        for lang_code, translation_data in translations.items():
+            all_tags.update(translation_data["tags"])
+        combined_tags = list(all_tags)
         
         # KORRIGIERT: Bild-Metadaten für Flutter-App kompatible Struktur
         image_doc = {
