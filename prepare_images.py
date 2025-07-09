@@ -534,7 +534,7 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
         "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{sub_cat_id}.png",
         "subcategoryIds": [],  # Leer für Subkategorien
         "ageGroup": age_group,
-        "parentCategoryId": main_cat_id,
+        "parentCategoryId": main_cat_id,  # 🔥 WICHTIG: Verweis auf Hauptkategorie
         "order": 0
     }
     
@@ -556,7 +556,7 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
             "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{main_cat_id}.png",
             "subcategoryIds": [sub_cat_id],  # Reine Subkategorie-ID
             "ageGroup": age_group,
-            "parentCategoryId": "",
+            "parentCategoryId": "",  # 🔥 WICHTIG: Leer für Hauptkategorien
             "order": 0
         }
         
