@@ -167,6 +167,45 @@ LANG_MAP: Dict[str, str] = {
 # KORRIGIERT: Flexible Pfade
 BASE_IMAGE_DIRECTORY = Path(os.getenv("BASE_IMAGE_DIRECTORY", "./images"))
 CACHE_DIRECTORY = Path(os.getenv("CACHE_DIRECTORY", "./cache"))
+
+# KORRIGIERT: Feste Kategorie-IDs für Flutter-App Kompatibilität
+VALID_CATEGORY_IDS = {
+    # Altersgruppen-Kategorien
+    "kleinkinder-0-5": "kleinkinder-0-5",
+    "schulkinder-6-13": "schulkinder-6-13", 
+    "jugendliche-erwachsene-14-99": "jugendliche-erwachsene-14-99",
+    # Lernkategorien
+    "formen": "formen",
+    "zahlen": "zahlen", 
+    "abc": "abc"
+}
+
+# KORRIGIERT: Mapping von Ordnernamen zu festen Kategorie-IDs
+CATEGORY_MAPPING = {
+    # Altersgruppen-basierte Mapping
+    "kleinkinder": "kleinkinder-0-5",
+    "0-5": "kleinkinder-0-5",
+    "schulkinder": "schulkinder-6-13", 
+    "6-13": "schulkinder-6-13",
+    "jugendliche": "jugendliche-erwachsene-14-99",
+    "erwachsene": "jugendliche-erwachsene-14-99",
+    "14-99": "jugendliche-erwachsene-14-99",
+    # Lernkategorien
+    "formen": "formen",
+    "geometrie": "formen",
+    "zahlen": "zahlen",
+    "mathematik": "zahlen", 
+    "abc": "abc",
+    "alphabet": "abc",
+    "buchstaben": "abc"
+}
+
+# KORRIGIERT: Altersgruppen-Werte für Flutter-App
+AGE_GROUP_MAPPING = {
+    "kleinkinder-0-5": "0-5",
+    "schulkinder-6-13": "6-13",
+    "jugendliche-erwachsene-14-99": "14-99+"
+}
 # ──────────────────────── LOGGING ──────────────────────────
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s | %(message)s",
@@ -487,25 +526,30 @@ def translate_category_name(category_name: str) -> Dict[str, str]:
 def create_categories(main_cat: str, sub_cat: str) -> str:
     """
     Erstellt Kategorien basierend auf Ordnerstruktur maincat_subcat
-    Subkategorie wird in alle 100 Sprachen übersetzt
+    KORRIGIERT: Verwendet feste Kategorie-IDs für Flutter-App Kompatibilität
     """
     _initialize_services()
     
-    # Hauptkategorie erstellen/aktualisieren
-    main_cat_id = re.sub(r"[^a-z0-9]+", "-", main_cat.lower())
+    # KORRIGIERT: Mapping zu festen Kategorie-IDs
+    main_cat_lower = main_cat.lower()
+    category_id = None
+    
+    # Suche nach passender Kategorie-ID
+    for key, value in CATEGORY_MAPPING.items():
+        if key in main_cat_lower:
+            category_id = value
+            break
+    
+    # Fallback: Verwende erste Kategorie als Standard
+    if category_id is None:
+        category_id = "schulkinder-6-13"
+        log.warning("Keine passende Kategorie gefunden für '%s'. Verwende Standard: %s", main_cat, category_id)
+    
+    # KORRIGIERT: Altersgruppe aus Mapping
+    age_group = AGE_GROUP_MAPPING.get(category_id, "6-13")
     
     # Multi-language names für Hauptkategorie mit echten Übersetzungen
     main_cat_names = translate_category_name(main_cat)
-    
-    # Altersgruppe basierend auf Kategorie bestimmen
-    if "kleinkinder" in main_cat.lower() or "0-5" in main_cat:
-        age_group = "0-5"
-    elif "schulkinder" in main_cat.lower() or "6-12" in main_cat:
-        age_group = "6-12"
-    elif "erwachsene" in main_cat.lower() or "jugendliche" in main_cat.lower() or "13-99" in main_cat:
-        age_group = "13-99"
-    else:
-        age_group = "6-12"  # Standard-Altersgruppe
     
     # Subkategorie basierend auf Ordnername erstellen
     sub_cat_id = re.sub(r"[^a-z0-9]+", "-", sub_cat.lower())
@@ -527,53 +571,28 @@ def create_categories(main_cat: str, sub_cat: str) -> str:
             log.warning("Übersetzung von '%s' nach %s fehlgeschlagen: %s", sub_cat, lang_name, e)
             sub_cat_translations[lang_code] = sub_cat  # Fallback
     
-    # Erstelle Subkategorie-Dokument
-    sub_cat_doc = {
-        "id": sub_cat_id,
-        "names": sub_cat_translations,  # Vollständige Übersetzungen in alle Sprachen
-        "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{sub_cat_id}.png",
-        "subcategoryIds": [],  # Leer für Subkategorien
+    # KORRIGIERT: Erstelle Hauptkategorie-Dokument mit fester ID
+    main_cat_doc = {
+        "id": category_id,
+        "names": main_cat_names,
+        "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{category_id}.png",
+        "subcategoryIds": [],  # Leer für Hauptkategorien
         "ageGroup": age_group,
-        "parentCategoryId": main_cat_id,
+        "parentCategoryId": "",
         "order": 0
     }
     
-    # Subkategorie erstellen (nur wenn noch nicht existiert)
-    sub_cat_ref = _db.collection("categories").document(sub_cat_id)
-    if not sub_cat_ref.get().exists:
-        sub_cat_ref.set(sub_cat_doc)
-        log.info("Subkategorie erstellt: %s (%s)", sub_cat_id, sub_cat)
-    
-    # Hauptkategorie erstellen/aktualisieren
-    main_cat_ref = _db.collection("categories").document(main_cat_id)
+    # KORRIGIERT: Hauptkategorie erstellen/aktualisieren
+    main_cat_ref = _db.collection("categories").document(category_id)
     main_cat_data = main_cat_ref.get()
     
     if not main_cat_data.exists:
-        # Neue Hauptkategorie erstellen
-        main_cat_doc = {
-            "id": main_cat_id,
-            "names": main_cat_names,
-            "iconUrl": f"https://storage.googleapis.com/{FIREBASE_BUCKET}/icons/{main_cat_id}.png",
-            "subcategoryIds": [sub_cat_id],  # Reine Subkategorie-ID
-            "ageGroup": age_group,
-            "parentCategoryId": "",
-            "order": 0
-        }
-        
         main_cat_ref.set(main_cat_doc)
-        log.info("Hauptkategorie '%s' erstellt mit Subkategorie: %s", main_cat, sub_cat_id)
+        log.info("Hauptkategorie erstellt: %s (%s)", category_id, main_cat)
     else:
-        # Hauptkategorie existiert bereits - Subkategorie hinzufügen falls nicht vorhanden
-        existing_data = main_cat_data.to_dict()
-        existing_subcategories = existing_data.get("subcategoryIds", [])
-        
-        if sub_cat_id not in existing_subcategories:
-            main_cat_ref.update({
-                "subcategoryIds": firestore.ArrayUnion([sub_cat_id])
-            })
-            log.info("Subkategorie '%s' zu Hauptkategorie '%s' hinzugefügt", sub_cat_id, main_cat_id)
+        log.info("Hauptkategorie existiert bereits: %s", category_id)
     
-    return sub_cat_id
+    return category_id
 # ───────────────────────── WORKER ───────────────────────────
 def process_png(png_path: Path, main_cat: str, sub_cat: str):
     log.info("Starte Verarbeitung von Bild: %s (Kategorie: %s/%s)", png_path.name, main_cat, sub_cat)
@@ -623,27 +642,21 @@ def process_png(png_path: Path, main_cat: str, sub_cat: str):
         slug = slug[:50].strip('-') or "bild"
         slug += "-" + uuid.uuid4().hex[:6]
         
-        svg_blob_name = f"{main_cat}/{sub_cat}/{slug}.svg"
-        png_blob_name = f"{main_cat}/{sub_cat}/{slug}.png"
+        # KORRIGIERT: Storage-Pfade für Flutter-App Kompatibilität
+        category_id = create_categories(main_cat, sub_cat)
+        svg_blob_name = f"images/{category_id}/{slug}.svg"
+        png_blob_name = f"thumbnails/{category_id}/{slug}.png"
         
         log.info("Schritt 4: Lade Dateien zu Firebase Storage hoch...")
         upload(svg_a4, svg_blob_name, "image/svg+xml")
         upload(thumb_png, png_blob_name, "image/png")
         
-        log.info("Schritt 5: Erstelle Kategorien...")
-        category_id = create_categories(main_cat, sub_cat)
+        log.info("Schritt 5: Kategorien bereits erstellt...")
         
         log.info("Schritt 6: Speichere Metadaten in Firestore...")
         
-        # Altersgruppe basierend auf Kategorie bestimmen
-        if "kleinkinder" in main_cat.lower() or "0-5" in main_cat:
-            age_group = "0-5"
-        elif "schulkinder" in main_cat.lower() or "6-12" in main_cat:
-            age_group = "6-12"
-        elif "erwachsene" in main_cat.lower() or "jugendliche" in main_cat.lower() or "13-99" in main_cat:
-            age_group = "13-99"
-        else:
-            age_group = "6-12"  # Standard-Altersgruppe
+        # KORRIGIERT: Altersgruppe aus Mapping verwenden
+        age_group = AGE_GROUP_MAPPING.get(category_id, "6-13")
         
         # Tags in ALLEN 100 Sprachen sammeln
         all_tags = set()
@@ -659,7 +672,7 @@ def process_png(png_path: Path, main_cat: str, sub_cat: str):
             "tags": combined_tags,  # KORRIGIERT: tags als Liste statt Dictionary
             "thumbnailPath": png_blob_name,  # Pfad für Flutter-App
             "svgPath": svg_blob_name,        # Pfad für Flutter-App
-            "categoryId": category_id,       # Direkte Referenz zur Subkategorie (reine ID)
+            "categoryId": category_id,       # KORRIGIERT: Feste Kategorie-ID für Flutter-App
             "isNew": True,
             "popularity": 0,
             "timestamp": firestore.SERVER_TIMESTAMP,  # KORRIGIERT: korrekte Timestamp-Verwendung
